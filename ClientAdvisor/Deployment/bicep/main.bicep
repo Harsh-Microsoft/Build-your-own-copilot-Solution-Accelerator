@@ -34,7 +34,6 @@ module cosmosDBModule 'deploy_cosmos_db.bicep' = {
   params: {
     solutionName: solutionPrefix
     solutionLocation: cosmosLocation
-    identity:managedIdentityModule.outputs.managedIdentityOutput.objectId
   }
   scope: resourceGroup(resourceGroup().name)
 }
@@ -195,9 +194,7 @@ module createIndex 'deploy_index_scripts.bicep' = {
 module appserviceModule 'deploy_app_service.bicep' = {
   name: 'deploy_app_service'
   params: {
-    identity:managedIdentityModule.outputs.managedIdentityOutput.id
     solutionName: solutionPrefix
-    solutionLocation: solutionLocation
     AzureSearchService:azSearchService.outputs.searchServiceOutput.searchServiceName
     AzureSearchIndex:'transcripts_index'
     AzureSearchKey:azSearchService.outputs.searchServiceOutput.searchServiceAdminKey
@@ -235,7 +232,6 @@ module appserviceModule 'deploy_app_service.bicep' = {
     SQLDB_USERNAME:sqlDBModule.outputs.sqlDbOutput.sqlDbUser
     SQLDB_PASSWORD:sqlDBModule.outputs.sqlDbOutput.sqlDbPwd
     AZURE_COSMOSDB_ACCOUNT: cosmosDBModule.outputs.cosmosOutput.cosmosAccountName
-    AZURE_COSMOSDB_ACCOUNT_KEY: cosmosDBModule.outputs.cosmosOutput.cosmosAccountKey
     AZURE_COSMOSDB_CONVERSATIONS_CONTAINER: cosmosDBModule.outputs.cosmosOutput.cosmosContainerName
     AZURE_COSMOSDB_DATABASE: cosmosDBModule.outputs.cosmosOutput.cosmosDatabaseName
     AZURE_COSMOSDB_ENABLE_FEEDBACK: 'True'

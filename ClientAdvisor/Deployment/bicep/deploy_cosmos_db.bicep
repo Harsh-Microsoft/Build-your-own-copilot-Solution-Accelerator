@@ -9,8 +9,6 @@ param accountName string = '${ solutionName }-cosmos'
 param databaseName string = 'db_conversation_history'
 param collectionName string = 'conversations'
 
-param identity string
-
 param containers array = [
   {
     name: collectionName
