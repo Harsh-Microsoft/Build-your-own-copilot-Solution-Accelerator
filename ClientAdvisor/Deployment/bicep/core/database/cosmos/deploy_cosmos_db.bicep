@@ -67,12 +67,8 @@ resource database 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases@2022-05-15
   ]
 }
 
-var cosmosAccountKey = cosmos.listKeys().primaryMasterKey
-// #listKeys(cosmos.id, cosmos.apiVersion).primaryMasterKey
-
 output cosmosOutput object = {
-  cosmosAccountName: cosmos.name
-  cosmosAccountKey: cosmosAccountKey 
+  cosmosAccountName: cosmos.name 
   cosmosDatabaseName: databaseName
   cosmosContainerName: collectionName
 }
