@@ -29,7 +29,7 @@ module managedIdentityModule 'deploy_managed_identity.bicep' = {
   scope: resourceGroup(resourceGroup().name)
 }
 
-module cosmosDBModule 'deploy_cosmos_db.bicep' = {
+module cosmosDBModule 'core/database/cosmos/deploy_cosmos_db.bicep' = {
   name: 'deploy_cosmos_db'
   params: {
     solutionName: solutionPrefix
