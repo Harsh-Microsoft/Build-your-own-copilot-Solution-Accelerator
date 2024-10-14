@@ -22,6 +22,9 @@ curl --output "$zipFileName2" "$zipUrl2"
 unzip /mnt/azscripts/azscriptinput/"$zipFileName1" -d /mnt/azscripts/azscriptinput/"$extractedFolder1"
 unzip /mnt/azscripts/azscriptinput/"$zipFileName2" -d /mnt/azscripts/azscriptinput/"$extractedFolder2"
 
-az storage fs directory upload -f "$fileSystem" --account-name "$storageAccount" -s "$extractedFolder1" --account-key "$accountKey" --recursive
-az storage fs directory upload -f "$fileSystem" --account-name "$storageAccount" -s "$extractedFolder2" --account-key "$accountKey" --recursive
+# Authenticate with Azure using managed identity
+az login --identity
+
+az storage fs directory upload -f "$fileSystem" --account-name "$storageAccount" -s "$extractedFolder1" --recursive
+az storage fs directory upload -f "$fileSystem" --account-name "$storageAccount" -s "$extractedFolder2" --recursive
 
