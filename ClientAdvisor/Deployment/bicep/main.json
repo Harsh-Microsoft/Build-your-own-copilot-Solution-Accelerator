@@ -4,8 +4,8 @@
   "metadata": {
     "_generator": {
       "name": "bicep",
-      "version": "0.31.34.60546",
-      "templateHash": "15258689682412466487"
+      "version": "0.30.23.60470",
+      "templateHash": "7416729925277582144"
     }
   },
   "parameters": {
@@ -21,6 +21,27 @@
       "type": "string",
       "metadata": {
         "description": "CosmosDB Location"
+      }
+    },
+    "functionAppSqlPrompt": {
+      "type": "string",
+      "defaultValue": "A valid T-SQL query to find {query} for tables and columns provided below:\r\n1. Table: Clients\r\nColumns: ClientId,Client,Email,Occupation,MaritalStatus,Dependents\r\n2. Table: InvestmentGoals\r\nColumns: ClientId,InvestmentGoal\r\n3. Table: Assets\r\nColumns: ClientId,AssetDate,Investment,ROI,Revenue,AssetType\r\n4. Table: ClientSummaries\r\nColumns: ClientId,ClientSummary\r\n5. Table: InvestmentGoalsDetails\r\nColumns: ClientId,InvestmentGoal,TargetAmount,Contribution\r\n6. Table: Retirement\r\nColumns: ClientId,StatusDate,RetirementGoalProgress,EducationGoalProgress\r\n7.Table: ClientMeetings\r\nColumns: ClientId,ConversationId,Title,StartTime,EndTime,Advisor,ClientEmail\r\nUse Investement column from Assets table as value always.\r\nAssets table has snapshots of values by date. Do not add numbers across different dates for total values.\r\nDo not use client name in filter.\r\nDo not include assets values unless asked for.\r\nAlways use ClientId = {clientid} in the query filter.\r\nAlways return client name in the query.\r\nIf a question involves date and time, always use FORMAT(YourDateTimeColumn, 'yyyy-MM-dd HH:mm:ss') in the query.\r\nIf asked, provide information about client meetings according to the requested timeframe: give details about upcoming meetings if asked for \"next\" or \"upcoming\" meetings, and provide details about past meetings if asked for \"previous\" or \"last\" meetings including the scheduled time and don't filter with \"LIMIT 1\"  in the query.\r\nIf asked about the number of past meetings with this client, provide the count of records where the ConversationId is neither null nor an empty string and the EndTime is before the current date in the query.\r\nIf asked, provide information on the client's portfolio performance in the query.\r\nIf asked, provide information about the client's top-performing investments in the query.\r\nIf asked, provide information about any recent changes in the client's investment allocations in the query.\r\nIf asked about the client's portfolio performance over the last quarter, calculate the total investment by summing the investment amounts where AssetDate is greater than or equal to the date from one quarter ago using DATEADD(QUARTER, -1, GETDATE()) in the query.\r\nIf asked about upcoming important dates or deadlines for the client, always ensure that StartTime is greater than the current date. Do not convert the formats of StartTime and EndTime and consistently provide the upcoming dates along with the scheduled times in the query.\r\nTo determine the asset value, sum the investment values for the most recent available date.  If asked for the asset types in the portfolio and the present of each, provide a list of each asset type with its most recent investment value.\r\nIf the user inquires about asset on a specific date ,sum the investment values for the specific date avoid summing values from all dates prior to the requested date.If asked for the asset types in the portfolio and the value of each for specific date , provide a list of each asset type with specific date investment value avoid summing values from all dates prior to the requested date.\r\nOnly return the generated sql query. do not return anything else",
+      "metadata": {
+        "description": "The SQL prompt template for generating dynamic T-SQL queries based on user input and table schema within a function."
+      }
+    },
+    "functionAppCallTranscriptSystemPrompt": {
+      "type": "string",
+      "defaultValue": "You are an assistant who provides wealth advisors with helpful information to prepare for client meetings.\r\nYou have access to the client’s meeting call transcripts.\r\nIf requested for call transcript(s), the response for each transcript should be summarized separately and Ensure all transcripts for the specified client are retrieved and format **must** follow as First Call Summary,Second Call Summary etc.\r\nif asked related to count of call transcripts,**Always** respond the total number of sourceurid involved for the {ClientId} consistently, Do never change if question is reframed or contains \"so far\" or if the case is altered or having first name or full name of the client present with so far or case altered with first name of the client or case altered with first name of client and so far.\r\nYou can use this information to answer questions about the clients",
+      "metadata": {
+        "description": "The system message guiding the assistant to provide accurate summaries and counts of call transcripts by ClientId within a function."
+      }
+    },
+    "functionAppStreamTextSystemPrompt": {
+      "type": "string",
+      "defaultValue": "You are an assistant who provides wealth advisors with helpful information to prepare for client meetings. \r\nYou have access to the client’s meeting call transcripts.\r\nIf requested for call transcript(s), the response for each transcript should be summarized separately and Ensure all transcripts for the specified client are retrieved and format **must** follow as First Call Summary,Second Call Summary etc.\r\nif asked related to count of call transcripts, **Always** respond the total number of sourceurid involved for the {ClientId} consistently, Do never change if question is reframed or contains \"so far\" or if the case is altered or having first name or full name of the client present with so far or case altered with first name of the client or case altered with first name of client and so far.\r\nYou can use this information to answer questions about the clients\r\n",
+      "metadata": {
+        "description": "The system message guiding the assistant to provide accurate client meeting summaries with correct names and timestamps within a function."
       }
     }
   },
@@ -56,8 +77,8 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.31.34.60546",
-              "templateHash": "12508267066278938117"
+              "version": "0.30.23.60470",
+              "templateHash": "8775325455752085588"
             }
           },
           "parameters": {
@@ -145,8 +166,8 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.31.34.60546",
-              "templateHash": "11828480827139544665"
+              "version": "0.30.23.60470",
+              "templateHash": "2785991873795581274"
             }
           },
           "parameters": {
@@ -308,8 +329,8 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.31.34.60546",
-              "templateHash": "3549774837624453156"
+              "version": "0.30.23.60470",
+              "templateHash": "12450674202806076921"
             }
           },
           "parameters": {
@@ -466,8 +487,8 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.31.34.60546",
-              "templateHash": "12627712322898660298"
+              "version": "0.30.23.60470",
+              "templateHash": "2160762555547388608"
             }
           },
           "parameters": {
@@ -624,8 +645,8 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.31.34.60546",
-              "templateHash": "17239529093958196867"
+              "version": "0.30.23.60470",
+              "templateHash": "7447797843632120632"
             }
           },
           "parameters": {
@@ -706,8 +727,8 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.31.34.60546",
-              "templateHash": "5720304969592308179"
+              "version": "0.30.23.60470",
+              "templateHash": "1208105245776066647"
             }
           },
           "parameters": {
@@ -794,8 +815,8 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.31.34.60546",
-              "templateHash": "2043450591502080061"
+              "version": "0.30.23.60470",
+              "templateHash": "7369022468994960259"
             }
           },
           "parameters": {
@@ -925,8 +946,8 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.31.34.60546",
-              "templateHash": "6087269027573253102"
+              "version": "0.30.23.60470",
+              "templateHash": "17179626311402179428"
             }
           },
           "parameters": {
@@ -1036,6 +1057,15 @@
           },
           "functionAppVersion": {
             "value": "[variables('appversion')]"
+          },
+          "functionAppSqlSystemMessage": {
+            "value": "[parameters('functionAppSqlPrompt')]"
+          },
+          "functionAppCallTranscriptSystemMessage": {
+            "value": "[parameters('functionAppCallTranscriptSystemPrompt')]"
+          },
+          "functionAppStreamTextSystemMessage": {
+            "value": "[parameters('functionAppStreamTextSystemPrompt')]"
           }
         },
         "template": {
@@ -1044,8 +1074,8 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.31.34.60546",
-              "templateHash": "10231530585958508769"
+              "version": "0.30.23.60470",
+              "templateHash": "2959833963500103924"
             }
           },
           "parameters": {
@@ -1099,6 +1129,27 @@
             },
             "functionAppVersion": {
               "type": "string"
+            },
+            "functionAppSqlSystemMessage": {
+              "type": "string",
+              "defaultValue": "",
+              "metadata": {
+                "description": "Azure Function App SQL System Message"
+              }
+            },
+            "functionAppCallTranscriptSystemMessage": {
+              "type": "string",
+              "defaultValue": "",
+              "metadata": {
+                "description": "Azure Function App CallTranscript System Message"
+              }
+            },
+            "functionAppStreamTextSystemMessage": {
+              "type": "string",
+              "defaultValue": "",
+              "metadata": {
+                "description": "Azure Function App Stream Text System Message"
+              }
             }
           },
           "resources": [
@@ -1117,7 +1168,7 @@
               "properties": {
                 "azCliVersion": "2.50.0",
                 "primaryScriptUri": "[format('{0}Deployment/scripts/create_azure_functions.sh', parameters('baseUrl'))]",
-                "arguments": "[format('{0} {1} {2} {3} {4} {5} {6} {7} {8} {9} {10} {11} {12} {13} {14}', parameters('solutionName'), parameters('solutionLocation'), parameters('resourceGroupName'), parameters('baseUrl'), parameters('azureOpenAIApiKey'), parameters('azureOpenAIApiVersion'), parameters('azureOpenAIEndpoint'), parameters('azureSearchAdminKey'), parameters('azureSearchServiceEndpoint'), parameters('azureSearchIndex'), parameters('sqlServerName'), parameters('sqlDbName'), parameters('sqlDbUser'), parameters('sqlDbPwd'), parameters('functionAppVersion'))]",
+                "arguments": "[format('{0} {1} {2} {3} {4} {5} {6} {7} {8} {9} {10} {11} {12} {13} {14} {15} {16} {17}', parameters('solutionName'), parameters('solutionLocation'), parameters('resourceGroupName'), parameters('baseUrl'), parameters('azureOpenAIApiKey'), parameters('azureOpenAIApiVersion'), parameters('azureOpenAIEndpoint'), parameters('azureSearchAdminKey'), parameters('azureSearchServiceEndpoint'), parameters('azureSearchIndex'), parameters('sqlServerName'), parameters('sqlDbName'), parameters('sqlDbUser'), parameters('sqlDbPwd'), parameters('functionAppVersion'), parameters('functionAppSqlSystemMessage'), parameters('functionAppCallTranscriptSystemMessage'), parameters('functionAppStreamTextSystemMessage'))]",
                 "timeout": "PT1H",
                 "retentionInterval": "PT1H",
                 "cleanupPreference": "OnSuccess"
@@ -1157,8 +1208,8 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.31.34.60546",
-              "templateHash": "14069568468347897481"
+              "version": "0.30.23.60470",
+              "templateHash": "12066912124638066503"
             }
           },
           "parameters": {
@@ -1271,8 +1322,8 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.31.34.60546",
-              "templateHash": "5271454688668874284"
+              "version": "0.30.23.60470",
+              "templateHash": "15795256463028395602"
             }
           },
           "parameters": {
@@ -1763,8 +1814,8 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.31.34.60546",
-              "templateHash": "17388889661434191538"
+              "version": "0.30.23.60470",
+              "templateHash": "17279604675307278350"
             }
           },
           "parameters": {
@@ -1961,8 +2012,8 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.31.34.60546",
-              "templateHash": "16594210839276135691"
+              "version": "0.30.23.60470",
+              "templateHash": "12992411501533196723"
             }
           },
           "parameters": {
@@ -2606,8 +2657,8 @@
                   "metadata": {
                     "_generator": {
                       "name": "bicep",
-                      "version": "0.31.34.60546",
-                      "templateHash": "8033637033572984239"
+                      "version": "0.30.23.60470",
+                      "templateHash": "2622922268469466870"
                     },
                     "description": "Creates a SQL role assignment under an Azure Cosmos DB account."
                   },
