@@ -36,9 +36,9 @@ sqlDBConn="TBD"
 echo "functionAppSqlSystemMessage"
 echo "$functionAppSqlSystemMessage"
 echo "functionAppCallTranscriptSystemMessage"
-echo "$functionAppSqlSystemMessage"
+echo "$functionAppCallTranscriptSystemMessage"
 echo "functionAppStreamTextSystemMessage"
-echo "$functionAppSqlSystemMessage"
+echo "$functionAppStreamTextSystemMessage"
 
 az containerapp env create --name $env_name --enable-workload-profiles --resource-group $resourceGroupName --location $solutionLocation
 
