@@ -32,7 +32,8 @@ valueone="1"
 
 #sqlDBConn="DRIVER={ODBC Driver 18 for SQL Server};SERVER=${sqlServerName}.database.windows.net;DATABASE=${sqlDbName};UID=${sqlDbUser};PWD=${sqlDbPwd}"
 sqlDBConn="TBD"
-
+echo "functionAppVersion"
+echo "$functionAppVersion"
 echo "functionAppSqlSystemMessage"
 echo "$functionAppSqlSystemMessage"
 echo "functionAppCallTranscriptSystemMessage"
@@ -47,7 +48,7 @@ az storage account create --name $storageAccount --location eastus --resource-gr
 az functionapp create --resource-group $resourceGroupName --name $functionappname \
                 --environment $env_name --storage-account $storageAccount \
                 --functions-version 4 --runtime python \
-                --image bycwacontainerregpk.azurecr.io/byc-wa-fn:$functionAppVersion
+                --image bycwacontainerregpk.azurecr.io/byc-wa-fn:dev
 
 # Sleep for 120 seconds
 echo "Waiting for 120 seconds to ensure the Function App is properly created..."
