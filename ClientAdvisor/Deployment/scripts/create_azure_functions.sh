@@ -63,4 +63,5 @@ az functionapp config appsettings set --name $functionappname -g $resourceGroupN
                 PYTHON_ENABLE_INIT_INDEXING=$valueone PYTHON_ISOLATE_WORKER_DEPENDENCIES=$valueone \
                 SQLDB_CONNECTION_STRING=$sqlDBConn \
                 SQLDB_SERVER=$sqlServerName SQLDB_DATABASE=$sqlDbName SQLDB_USERNAME=$sqlDbUser SQLDB_PASSWORD=$sqlDbPwd \
-                AZURE_SQL_SYSTEM_MESSAGE=$functionAppSqlSystemMessage AZURE_CALL_TRANSCRIPT_SYSTEM_MESSAGE=$functionAppCallTranscriptSystemMessage AZURE_OPENAI_STREAM_TEXT_SYSTEM_MESSAGE=$functionAppStreamTextSystemMessage
+                AZURE_SQL_SYSTEM_MESSAGE=$functionAppSqlSystemMessage AZURE_CALL_TRANSCRIPT_SYSTEM_MESSAGE=$functionAppCallTranscriptSystemMessage \
+                AZURE_OPENAI_STREAM_TEXT_SYSTEM_MESSAGE=$functionAppStreamTextSystemMessage
