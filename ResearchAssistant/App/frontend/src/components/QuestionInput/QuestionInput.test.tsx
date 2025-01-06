@@ -173,4 +173,72 @@ describe("QuestionInput Component", () => {
       payload: false,
     });
   });
+  /////
+  test("calls sendQuestion on Enter key press", () => {
+    render(
+      <QuestionInput
+        onSend={mockOnSend}
+        disabled={false}
+        placeholder="Ask a question"
+      />
+    );
+
+    // Simulate user typing and pressing Enter
+    fireEvent.change(screen.getByPlaceholderText("Ask a question"), {
+      target: { value: "Test question" },
+    });
+    fireEvent.keyDown(screen.getByPlaceholderText("Ask a question"), {
+      key: "Enter",
+      code: "Enter",
+      charCode: 13,
+    });
+
+    // Verify sendQuestion is called with the correct input value
+    expect(mockOnSend).toHaveBeenCalledWith("Test question");
+  });
+
+  test("calls sendQuestion on Space key press when input is not empty", () => {
+    render(
+      <QuestionInput
+        onSend={mockOnSend}
+        disabled={false}
+        placeholder="Ask a question"
+      />
+    );
+
+    // Simulate user typing
+    fireEvent.change(screen.getByPlaceholderText("Ask a question"), {
+      target: { value: "Test question" },
+    });
+
+    // Simulate pressing the Space key
+    fireEvent.keyDown(screen.getByRole("button"), {
+      key: " ",
+      code: "Space",
+      charCode: 32,
+    });
+
+    // Verify sendQuestion is called with the correct input value
+    expect(mockOnSend).toHaveBeenCalledWith("Test question");
+  });
+
+  test("does not call sendQuestion on Space key press if input is empty", () => {
+    render(
+      <QuestionInput
+        onSend={mockOnSend}
+        disabled={false}
+        placeholder="Ask a question"
+      />
+    );
+
+    // Simulate pressing the Space key when input is empty
+    fireEvent.keyDown(screen.getByRole("button"), {
+      key: " ",
+      code: "Space",
+      charCode: 32,
+    });
+
+    // Verify sendQuestion is not called due to empty input
+    expect(mockOnSend).not.toHaveBeenCalled();
+  });
 });
