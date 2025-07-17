@@ -188,32 +188,30 @@ jobs:
               echo "Applying PR #$number ($ref) to $branch_name"
               git fetch origin "$ref"
               
-              if git cherry-pick --no-commit FETCH_HEAD; then
-                echo "✅ Successfully applied PR #$number without conflicts. Committing."
-                git commit -m "$(git log -1 --pretty=%B FETCH_HEAD)"
+              if git cherry-pick FETCH_HEAD; then
+                echo "✅ Successfully applied PR #$number without conflicts."
                 applied_prs_count=$((applied_prs_count + 1))
               else
                 echo "❌ Conflict found with PR #$number. Attempting 'merge and regenerate' strategy."
-                git cherry-pick --abort
                 
-                manifest_files_changed=$(git diff --name-only FETCH_HEAD^..FETCH_HEAD | grep -E "package.json|requirements.txt|pyproject.toml" || true)
+                # Check which manifest files are in a conflicted state
+                manifest_files_conflicted=$(git diff --name-only --diff-filter=U | grep -E "package.json|requirements.txt|pyproject.toml" || true)
 
-                if [ -n "$manifest_files_changed" ]; then
-                  for manifest_file in $manifest_files_changed; do
-                    echo "Attempting to merge manifest file: $manifest_file"
+                if [ -n "$manifest_files_conflicted" ]; then
+                  for manifest_file in $manifest_files_conflicted; do
+                    echo "Attempting to resolve conflict in manifest file: $manifest_file"
                     
-                    # Get the three versions of the manifest file needed for a merge
-                    git show HEAD:"$manifest_file" > current.txt
-                    git show FETCH_HEAD:"$manifest_file" > incoming.txt
-                    # Find the common ancestor to get the base version
-                    ancestor=$(git merge-base HEAD FETCH_HEAD)
-                    git show "$ancestor":"$manifest_file" > base.txt
-
-                    # Perform a 3-way merge on just this file
-                    if git merge-file -p current.txt base.txt incoming.txt > "$manifest_file"; then
+                    # Resolve the conflict using git merge-file
+                    # --ours is the current branch, --theirs is the incoming commit
+                    git checkout --ours "$manifest_file"
+                    git checkout --theirs "$manifest_file"
+                    
+                    if git merge-file -p "$manifest_file.ours" "$manifest_file.base" "$manifest_file.theirs" > "$manifest_file"; then
                       echo "Successfully merged $manifest_file."
+                      git add "$manifest_file"
                     else
-                      echo "❌ Could not automatically merge $manifest_file. Skipping this PR."
+                      echo "❌ Could not automatically merge $manifest_file. Aborting cherry-pick."
+                      git cherry-pick --abort
                       continue 2 # Skip to the next PR in the outer loop
                     fi
                   done
@@ -230,7 +228,6 @@ jobs:
                         npm install --ignore-scripts
                         git add package-lock.json
                       fi
-                      git add package.json
                       ;;
                     backend)
                       echo "Running 'pip install' to update dependencies."
@@ -239,11 +236,17 @@ jobs:
                       ;;
                   esac
                   
-                  git commit -m "$(git log -1 --pretty=%B FETCH_HEAD)"
-                  echo "✅ Successfully resolved conflict and applied PR #$number."
-                  applied_prs_count=$((applied_prs_count + 1))
+                  # Finalize the cherry-pick
+                  if git cherry-pick --continue; then
+                    echo "✅ Successfully resolved conflict and applied PR #$number."
+                    applied_prs_count=$((applied_prs_count + 1))
+                  else
+                    echo "❌ Failed to continue cherry-pick after resolving conflicts. Aborting."
+                    git cherry-pick --abort
+                  fi
                 else
-                  echo "❌ Cherry-pick failed and no known manifest file was changed. Skipping PR #$number."
+                  echo "❌ Cherry-pick failed with a conflict in a file other than a known manifest. Aborting."
+                  git cherry-pick --abort
                 fi
               fi
             done < "$file"
@@ -260,9 +263,16 @@ jobs:
             fi
 
             new_lines=""
+            # Get the list of applied PRs from the git log of the current branch
+            # that are also in our list of PRs to process for this group
+            applied_pr_numbers=()
             while read -r number ref group; do
-              IFS="|" read -r title url _ <<< "${pr_metadata_map["$number"]}"
-              new_lines+="- $title - [#$number]($url)\n"
+              pr_title_grep=$(echo "${pr_metadata_map["$number"]}" | cut -d'|' -f1)
+              if git log "origin/$TARGET_BRANCH"..HEAD --oneline --grep="$pr_title_grep"; then
+                applied_pr_numbers+=($number)
+                IFS="|" read -r title url _ <<< "${pr_metadata_map["$number"]}"
+                new_lines+="- $title - [#$number]($url)\n"
+              fi
             done < "$file"
 
             pr_title="chore(deps): bump grouped $group_name dependencies"
@@ -292,7 +302,7 @@ jobs:
             fi
 
             if [ -n "$pr_url" ]; then
-              while read -r number ref group; do
+              for number in "${applied_pr_numbers[@]}"; do
                 IFS="|" read -r _ _ labels <<< "${pr_metadata_map["$number"]}"
                 if [ -n "$labels" ]; then
                   if [ "$DRY_RUN" == "true" ]; then
@@ -307,7 +317,7 @@ jobs:
                 else
                   gh pr close "$number" --comment "Grouped into $pr_url for easier review and testing." || echo "Failed to close PR #$number"
                 fi
-              done < "$file"
+              done
               echo "✅ Successfully processed group '$group_name' with branch '$branch_name'"
             else
               echo "❌ Grouped PR was not created for group '$group_name'. Skipping closing of original PRs."
