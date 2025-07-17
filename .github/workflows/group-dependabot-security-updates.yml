@@ -150,7 +150,7 @@ jobs:
           for file in "${grouped_files[@]}"; do
             group_name=$(basename "$file" .txt)
             safe_group_name=$(echo "$group_name" | tr -c '[:alnum:]_-' '-')
-            branch_name="security/grouped-${safe_group_name}-updates"
+            branch_name="security/grouped-${safe_group_name}updates"
             
             echo "Processing group: $group_name (branch: $branch_name)"
             
@@ -170,10 +170,10 @@ jobs:
               echo "Merging PR #$number ($ref) into $branch_name"
               git fetch origin "$ref"
               
-              if ! git merge FETCH_HEAD --no-edit -m "Merge PR #$number: $(echo "${pr_metadata_map["$number"]}" | cut -d'|' -f1)"; then
+              if ! git merge FETCH_HEAD --no-edit --allow-unrelated-histories -m "Merge PR #$number: $(echo "${pr_metadata_map["$number"]}" | cut -d'|' -f1)"; then
                 echo "Conflict found when merging PR #$number ($ref). Attempting to resolve."
                 conflict_files=($(git diff --name-only --diff-filter=U))
-                
+                  
                 if [ ${#conflict_files[@]} -gt 0 ]; then
                   echo "Resolving conflicts in files: ${conflict_files[*]}"
                   for conflict_file in "${conflict_files[@]}"; do
@@ -186,13 +186,19 @@ jobs:
                     echo "Successfully resolved conflicts and committed merge for PR #$number"
                   else
                     echo "Failed to commit merge resolution for PR #$number. Aborting merge."
-                    git merge --abort
+                    # Check if merge is in progress before aborting
+                    if [ -f ".git/MERGE_HEAD" ]; then
+                      git merge --abort
+                    fi
                     merge_success=false
                     continue
                   fi
                 else
-                  echo "No conflicting files found. Aborting merge for PR #$number."
-                  git merge --abort
+                  echo "No conflicting files found but merge failed. Aborting merge for PR #$number."
+                  # Check if merge is in progress before aborting
+                  if [ -f ".git/MERGE_HEAD" ]; then
+                    git merge --abort
+                  fi
                   merge_success=false
                   continue
                 fi
