@@ -1,7 +1,7 @@
 # Workflow: Group Dependabot PRs
 # Description:
 # This GitHub Actions workflow automatically groups open Dependabot PRs by ecosystem.
-# It uses a sophisticated "patch and regenerate" strategy for conflict resolution,
+# It uses a sophisticated "merge and regenerate" strategy for conflict resolution,
 # ensuring that dependency updates are combined correctly even when they conflict.
 #
 # Key Features:
@@ -180,63 +180,68 @@ jobs:
             applied_prs_count=0
             while read -r number ref group; do
               pr_title_grep=$(echo "${pr_metadata_map["$number"]}" | cut -d'|' -f1)
-              if git log --oneline --grep="$pr_title_grep"; then
-                echo "PR #$number seems to be already applied. Skipping."
-                continue
-              fi
+              # if git log --oneline --grep="$pr_title_grep"; then
+              # echo "PR #$number seems to be already applied. Skipping."
+              # continue
+              # fi
 
               echo "Applying PR #$number ($ref) to $branch_name"
               git fetch origin "$ref"
               
-              if git cherry-pick FETCH_HEAD; then
-                echo "✅ Successfully applied PR #$number without conflicts."
+              if git cherry-pick --no-commit FETCH_HEAD; then
+                echo "✅ Successfully applied PR #$number without conflicts. Committing."
+                git commit -m "$(git log -1 --pretty=%B FETCH_HEAD)"
                 applied_prs_count=$((applied_prs_count + 1))
               else
-                echo "❌ Conflict found with PR #$number. Attempting 'patch and regenerate' strategy."
+                echo "❌ Conflict found with PR #$number. Attempting 'merge and regenerate' strategy."
                 git cherry-pick --abort
                 
                 manifest_files_changed=$(git diff --name-only FETCH_HEAD^..FETCH_HEAD | grep -E "package.json|requirements.txt|pyproject.toml" || true)
 
                 if [ -n "$manifest_files_changed" ]; then
-                  echo "Found manifest file changes: $manifest_files_changed. Creating patch."
-                  git diff FETCH_HEAD^..FETCH_HEAD -- $manifest_files_changed > patch.diff
-                  
-                  if git apply --check patch.diff; then
-                    git apply patch.diff
-                    echo "Successfully applied patch for manifest file(s)."
-
-                    case "$group_name" in
-                      frontend)
-                        if [ -f "yarn.lock" ]; then
-                          echo "Running 'yarn install' to regenerate yarn.lock"
-                          yarn install
-                          git add yarn.lock
-                        elif [ -f "package-lock.json" ]; then
-                          echo "Running 'npm install' to regenerate package-lock.json"
-                          npm install
-                          git add package-lock.json
-                        fi
-                        git add package.json
-                        ;;
-                      backend)
-                        echo "Running 'pip install' to update dependencies."
-                        pip install -r src/App/requirements.txt
-                        git add src/App/requirements.txt
-                        ;;
-                      *)
-                        echo "Unknown ecosystem '$group_name' for lockfile regeneration. Skipping."
-                        rm patch.diff
-                        continue
-                        ;;
-                    esac
+                  for manifest_file in $manifest_files_changed; do
+                    echo "Attempting to merge manifest file: $manifest_file"
                     
-                    git commit -m "$(git log -1 --pretty=%B FETCH_HEAD)"
-                    echo "✅ Successfully resolved conflict and applied PR #$number."
-                    applied_prs_count=$((applied_prs_count + 1))
-                  else
-                    echo "❌ Patch for PR #$number could not be applied cleanly. Skipping this PR."
-                  fi
-                  rm patch.diff
+                    # Get the three versions of the manifest file needed for a merge
+                    git show HEAD:"$manifest_file" > current.txt
+                    git show FETCH_HEAD:"$manifest_file" > incoming.txt
+                    # Find the common ancestor to get the base version
+                    ancestor=$(git merge-base HEAD FETCH_HEAD)
+                    git show "$ancestor":"$manifest_file" > base.txt
+
+                    # Perform a 3-way merge on just this file
+                    if git merge-file -p current.txt base.txt incoming.txt > "$manifest_file"; then
+                      echo "Successfully merged $manifest_file."
+                    else
+                      echo "❌ Could not automatically merge $manifest_file. Skipping this PR."
+                      continue 2 # Skip to the next PR in the outer loop
+                    fi
+                  done
+
+                  # Now that the manifest is merged, regenerate the lockfile
+                  case "$group_name" in
+                    frontend)
+                      if [ -f "yarn.lock" ]; then
+                        echo "Running 'yarn install' to regenerate yarn.lock"
+                        yarn install --ignore-scripts
+                        git add yarn.lock
+                      elif [ -f "package-lock.json" ]; then
+                        echo "Running 'npm install' to regenerate package-lock.json"
+                        npm install --ignore-scripts
+                        git add package-lock.json
+                      fi
+                      git add package.json
+                      ;;
+                    backend)
+                      echo "Running 'pip install' to update dependencies."
+                      pip install -r src/App/requirements.txt
+                      git add src/App/requirements.txt
+                      ;;
+                  esac
+                  
+                  git commit -m "$(git log -1 --pretty=%B FETCH_HEAD)"
+                  echo "✅ Successfully resolved conflict and applied PR #$number."
+                  applied_prs_count=$((applied_prs_count + 1))
                 else
                   echo "❌ Cherry-pick failed and no known manifest file was changed. Skipping PR #$number."
                 fi
