@@ -1,29 +1,25 @@
 # Workflow: Group Dependabot PRs
 # Description:
-# This GitHub Actions workflow automatically groups open Dependabot PRs by ecosystem (pip, npm).
-# It merges individual PR changes into grouped branches in chronological order (sorted by PR number), resolves merge conflicts automatically, and opens consolidated PRs.
-# It also closes the original Dependabot PRs and carries over their labels and metadata.
-# Improvements:
-# - Uses merge strategy instead of cherry-pick for better conflict resolution
-# - Sorts PRs by number at fetch time for consistent chronological processing
-# - Handles multiple conflicting files during merge
-# - Deduplicates entries in PR description
-# - Avoids closing original PRs unless grouped PR creation succeeds
-# - More efficient retry logic
-# - Ecosystem grouping is now configurable via native YAML map
-# - Uses safe namespaced branch naming (e.g. security/grouped-...) to avoid developer conflict
-# - Ensures PR body formatting uses real newlines for better readability
-# - Adds strict error handling for script robustness
-# - Accounts for tool dependencies (jq, gh) and race conditions
-# - Optimized PR metadata lookup by preloading into associative array
-# - Supports --dry-run mode for validation/testing without side effects
-# - Note: PRs created during workflow execution will be picked up in the next scheduled run.
+# This GitHub Actions workflow automatically groups open Dependabot PRs by ecosystem.
+# It uses a sophisticated "patch and regenerate" strategy for conflict resolution,
+# ensuring that dependency updates are combined correctly even when they conflict.
+#
+# Key Features:
+# - Chronological processing of PRs (sorted by PR number).
+# - Intelligent Conflict Resolution: Instead of merging complex lockfiles, it applies
+#   changes to the manifest file (e.g., package.json) and regenerates a fresh,
+#   consistent lockfile using the native package manager (npm, yarn, pip).
+# - Stale Branch Handling: Automatically rebases the grouped branch against the target
+#   branch (main) at the start of each run to incorporate the latest changes.
+# - Deduplication: Checks if a PR has already been applied to avoid duplicates.
+# - Multi-Ecosystem Support: Configurable grouping and conflict resolution for npm, yarn, and pip.
+# - Dry-Run Mode: Allows for safe testing and validation of the workflow's logic.
 
 name: Group Dependabot PRs
 
 on:
   schedule:
-    - cron: '0 0 * * *'  # Run daily at midnight UTC
+    - cron: '0 0 * * *' # Run daily at midnight UTC
   workflow_dispatch:
     inputs:
       group_config_pip:
@@ -65,6 +61,19 @@ jobs:
         run: |
           git config --global user.name "github-actions"
           git config --global user.email "github-actions@github.com"
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+      
+      - name: Install Yarn
+        run: npm install -g yarn
 
       - name: Install required tools
         run: |
@@ -109,7 +118,7 @@ jobs:
         run: |
           echo "Running in dry-run mode. No changes will be pushed or PRs created/closed."
 
-      - name: Group PRs by ecosystem and merge in sorted order
+      - name: Group PRs by ecosystem and apply with rebase
         run: |
           declare -A GROUP_CONFIG=(
             [pip]="${GROUP_CONFIG_PIP:-backend}"
@@ -118,7 +127,6 @@ jobs:
           )
           mkdir -p grouped
           
-          # Group PRs by ecosystem (data is already sorted by PR number)
           jq -c '.[]' prs.json | while read pr; do
             ref=$(echo "$pr" | jq -r '.ref')
             number=$(echo "$pr" | jq -r '.number')
@@ -140,86 +148,112 @@ jobs:
             exit 0
           fi
 
-          # Pre-load PR metadata for efficient lookup
           declare -A pr_metadata_map
           while IFS=$'\t' read -r number title url labels; do
             pr_metadata_map["$number"]="$title|$url|$labels"
           done < <(jq -r '.[] | "\(.number)\t\(.title)\t\(.url)\t\(.labels | join(","))"' prs.json)
 
-          # Process each group
+          git fetch origin "$TARGET_BRANCH"
+
           for file in "${grouped_files[@]}"; do
             group_name=$(basename "$file" .txt)
-            safe_group_name=$(echo "$group_name" | tr -c '[:alnum:]_-' '-')
-            branch_name="security/grouped-${safe_group_name}updates"
+            safe_group_name=$(echo "$group_name" | tr -c '[:alnum:]_-' '-' | sed 's/--/-/g' | sed 's/-$//')
+            branch_name="security/grouped-${safe_group_name}-updates"
             
             echo "Processing group: $group_name (branch: $branch_name)"
             
-            # Create or checkout the grouped branch
-            git checkout -B "$branch_name"
-
-            # Try to merge existing grouped branch if it exists on remote
-            git fetch origin "$branch_name" 2>/dev/null || true
-            if git rev-parse "origin/$branch_name" >/dev/null 2>&1; then
-              echo "Merging existing remote branch origin/$branch_name"
-              git merge origin/"$branch_name" --no-edit || true
+            if git rev-parse --verify "origin/$branch_name" >/dev/null 2>&1; then
+              echo "Existing grouped branch 'origin/$branch_name' found. Checking it out."
+              git checkout -B "$branch_name" "origin/$branch_name"
+              
+              echo "Rebasing '$branch_name' onto 'origin/$TARGET_BRANCH' to incorporate latest changes."
+              if ! git rebase "origin/$TARGET_BRANCH"; then
+                  echo "Aborting rebase due to conflicts. The grouped PR for '$group_name' will not be updated this run."
+                  git rebase --abort
+                  continue
+              fi
+            else
+              echo "No existing grouped branch found. Creating new branch from 'origin/$TARGET_BRANCH'."
+              git checkout -B "$branch_name" "origin/$TARGET_BRANCH"
             fi
 
-            # Merge PRs in sorted order (file is already sorted by PR number from jq)
-            merge_success=true
+            applied_prs_count=0
             while read -r number ref group; do
-              echo "Merging PR #$number ($ref) into $branch_name"
+              pr_title_grep=$(echo "${pr_metadata_map["$number"]}" | cut -d'|' -f1)
+              if git log --oneline --grep="$pr_title_grep"; then
+                echo "PR #$number seems to be already applied. Skipping."
+                continue
+              fi
+
+              echo "Applying PR #$number ($ref) to $branch_name"
               git fetch origin "$ref"
               
-              if ! git merge FETCH_HEAD --no-edit --allow-unrelated-histories -m "Merge PR #$number: $(echo "${pr_metadata_map["$number"]}" | cut -d'|' -f1)"; then
-                echo "Conflict found when merging PR #$number ($ref). Attempting to resolve."
-                conflict_files=($(git diff --name-only --diff-filter=U))
-                  
-                if [ ${#conflict_files[@]} -gt 0 ]; then
-                  echo "Resolving conflicts in files: ${conflict_files[*]}"
-                  for conflict_file in "${conflict_files[@]}"; do
-                    echo "Resolving conflict in $conflict_file using theirs strategy"
-                    git checkout --theirs "$conflict_file"
-                    git add "$conflict_file"
-                  done
-                  
-                  if git commit --no-edit -m "Merge PR #$number: $(echo "${pr_metadata_map["$number"]}" | cut -d'|' -f1) (with conflict resolution)"; then
-                    echo "Successfully resolved conflicts and committed merge for PR #$number"
-                  else
-                    echo "Failed to commit merge resolution for PR #$number. Aborting merge."
-                    # Check if merge is in progress before aborting
-                    if [ -f ".git/MERGE_HEAD" ]; then
-                      git merge --abort
-                    fi
-                    merge_success=false
-                    continue
-                  fi
-                else
-                  echo "No conflicting files found but merge failed. Aborting merge for PR #$number."
-                  # Check if merge is in progress before aborting
-                  if [ -f ".git/MERGE_HEAD" ]; then
-                    git merge --abort
-                  fi
-                  merge_success=false
-                  continue
-                fi
+              if git cherry-pick FETCH_HEAD; then
+                echo "✅ Successfully applied PR #$number without conflicts."
+                applied_prs_count=$((applied_prs_count + 1))
               else
-                echo "Successfully merged PR #$number without conflicts"
+                echo "❌ Conflict found with PR #$number. Attempting 'patch and regenerate' strategy."
+                git cherry-pick --abort
+                
+                manifest_files_changed=$(git diff --name-only FETCH_HEAD^..FETCH_HEAD | grep -E "package.json|requirements.txt|pyproject.toml" || true)
+
+                if [ -n "$manifest_files_changed" ]; then
+                  echo "Found manifest file changes: $manifest_files_changed. Creating patch."
+                  git diff FETCH_HEAD^..FETCH_HEAD -- $manifest_files_changed > patch.diff
+                  
+                  if git apply --check patch.diff; then
+                    git apply patch.diff
+                    echo "Successfully applied patch for manifest file(s)."
+
+                    case "$group_name" in
+                      frontend)
+                        if [ -f "yarn.lock" ]; then
+                          echo "Running 'yarn install' to regenerate yarn.lock"
+                          yarn install
+                          git add yarn.lock
+                        elif [ -f "package-lock.json" ]; then
+                          echo "Running 'npm install' to regenerate package-lock.json"
+                          npm install
+                          git add package-lock.json
+                        fi
+                        git add package.json
+                        ;;
+                      backend)
+                        echo "Running 'pip install' to update dependencies."
+                        pip install -r src/App/requirements.txt
+                        git add src/App/requirements.txt
+                        ;;
+                      *)
+                        echo "Unknown ecosystem '$group_name' for lockfile regeneration. Skipping."
+                        rm patch.diff
+                        continue
+                        ;;
+                    esac
+                    
+                    git commit -m "$(git log -1 --pretty=%B FETCH_HEAD)"
+                    echo "✅ Successfully resolved conflict and applied PR #$number."
+                    applied_prs_count=$((applied_prs_count + 1))
+                  else
+                    echo "❌ Patch for PR #$number could not be applied cleanly. Skipping this PR."
+                  fi
+                  rm patch.diff
+                else
+                  echo "❌ Cherry-pick failed and no known manifest file was changed. Skipping PR #$number."
+                fi
               fi
             done < "$file"
 
-            if [ "$merge_success" = false ]; then
-              echo "Some merges failed for group $group_name. Skipping push and PR creation."
+            if [ "$applied_prs_count" -eq 0 ]; then
+              echo "No new PRs were applied for group '$group_name'. Nothing to do."
               continue
             fi
 
-            # Push the grouped branch
             if [ "$DRY_RUN" == "true" ]; then
               echo "[DRY-RUN] Skipping git push for $branch_name"
             else
               git push --force origin "$branch_name"
             fi
 
-            # Build PR description with all included PRs (in sorted order)
             new_lines=""
             while read -r number ref group; do
               IFS="|" read -r title url _ <<< "${pr_metadata_map["$number"]}"
@@ -229,50 +263,19 @@ jobs:
             pr_title="chore(deps): bump grouped $group_name dependencies"
             existing_url=$(gh pr list --head "$branch_name" --base "$TARGET_BRANCH" --state open --json url --jq '.[0].url // empty')
 
-            # Create or update the grouped PR
             if [ -n "$existing_url" ]; then
-              echo "PR already exists: $existing_url"
+              echo "PR already exists: $existing_url. Updating it."
               pr_url="$existing_url"
-              current_body=$(gh pr view "$pr_url" --json body --jq .body)
-              
-              # Deduplicate entries in PR description
-              IFS=$'\n' read -d '' -r -a current_lines < <(printf '%s\0' "$current_body")
-              IFS=$'\n' read -d '' -r -a new_lines_arr < <(printf '%b\0' "$new_lines")
-              declare -A seen
-              for line in "${current_lines[@]}"; do
-                seen["$line"]=1
-              done
-              
-              filtered_lines=""
-              for line in "${new_lines_arr[@]}"; do
-                if [[ -n "$line" && -z "${seen["$line"]}" ]]; then
-                  filtered_lines+="$line\n"
-                fi
-              done
-              
-              if [ -n "$filtered_lines" ]; then
-                new_body="$current_body"$'\n'$filtered_lines
-              else
-                new_body="$current_body"
-              fi
-              
+              pr_body=$(printf "This PR groups multiple open Dependabot PRs for the %s ecosystem.\n\n**Included PRs:**\n%b" "$group_name" "$new_lines")
               if [ "$DRY_RUN" == "true" ]; then
                 echo "[DRY-RUN] Would update PR body for $pr_url"
-                echo "New content would be:"
-                echo "$new_body"
               else
-                tmpfile=$(mktemp)
-                printf '%s' "$new_body" > "$tmpfile"
-                gh pr edit "$pr_url" --body-file "$tmpfile"
-                rm -f "$tmpfile"
-                echo "Updated existing PR: $pr_url"
+                gh pr edit "$pr_url" --body "$pr_body"
               fi
             else
               pr_body=$(printf "This PR groups multiple open Dependabot PRs for the %s ecosystem.\n\n**Included PRs:**\n%b" "$group_name" "$new_lines")
               if [ "$DRY_RUN" == "true" ]; then
                 echo "[DRY-RUN] Would create PR titled: $pr_title"
-                echo "PR body would be:"
-                echo "$pr_body"
                 pr_url=""
               else
                 pr_url=$(gh pr create \
@@ -280,37 +283,26 @@ jobs:
                   --body "$pr_body" \
                   --base "$TARGET_BRANCH" \
                   --head "$branch_name")
-                echo "Created new grouped PR: $pr_url"
               fi
             fi
 
-            # Add labels and close original PRs only if grouped PR was created/updated successfully
             if [ -n "$pr_url" ]; then
               while read -r number ref group; do
                 IFS="|" read -r _ _ labels <<< "${pr_metadata_map["$number"]}"
-                
-                # Add labels from original PRs to grouped PR
                 if [ -n "$labels" ]; then
-                  IFS="," read -ra label_arr <<< "$labels"
-                  for label in "${label_arr[@]}"; do
-                    if [ -n "$label" ]; then
-                      if [ "$DRY_RUN" == "true" ]; then
-                        echo "[DRY-RUN] Would add label '$label' to $pr_url"
-                      else
-                        gh pr edit "$pr_url" --add-label "$label" 2>/dev/null || echo "Failed to add label '$label'"
-                      fi
-                    fi
-                  done
+                  if [ "$DRY_RUN" == "true" ]; then
+                    echo "[DRY-RUN] Would add labels '$labels' to $pr_url"
+                  else
+                    gh pr edit "$pr_url" --add-label "$labels" 2>/dev/null || echo "Failed to add labels"
+                  fi
                 fi
                 
-                # Close original PR
                 if [ "$DRY_RUN" == "true" ]; then
                   echo "[DRY-RUN] Would close PR #$number"
                 else
                   gh pr close "$number" --comment "Grouped into $pr_url for easier review and testing." || echo "Failed to close PR #$number"
                 fi
               done < "$file"
-              
               echo "✅ Successfully processed group '$group_name' with branch '$branch_name'"
             else
               echo "❌ Grouped PR was not created for group '$group_name'. Skipping closing of original PRs."
