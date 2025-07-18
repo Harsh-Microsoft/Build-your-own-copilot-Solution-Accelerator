@@ -201,16 +201,16 @@ jobs:
                   for manifest_file in $manifest_files_conflicted; do
                     echo "Attempting to resolve conflict in manifest file: $manifest_file"
                     
-                    # Get the three versions of the file from the index
                     git show :1:"$manifest_file" > base.txt
                     git show :2:"$manifest_file" > ours.txt
                     git show :3:"$manifest_file" > theirs.txt
 
-                    if git merge-file -p ours.txt base.txt theirs.txt > "$manifest_file"; then
-                      echo "Successfully merged $manifest_file."
+                    # Use --theirs to automatically resolve line-level conflicts by taking the incoming change
+                    if git merge-file --theirs -p ours.txt base.txt theirs.txt > "$manifest_file"; then
+                      echo "Successfully merged $manifest_file using 'theirs' strategy."
                       git add "$manifest_file"
                     else
-                      echo "❌ Could not automatically merge $manifest_file. Aborting."
+                      echo "❌ Even with --theirs, could not merge $manifest_file. Aborting."
                       resolution_failed=true
                       break
                     fi
@@ -221,11 +221,8 @@ jobs:
                     continue
                   fi
 
-                  # Now that the manifest is merged, regenerate the lockfile
                   case "$group_name" in
                     frontend)
-                      # Resolve lockfile conflicts by simply removing them and regenerating
-                      git rm -f yarn.lock package-lock.json
                       if [ -f "package.json" ]; then
                         if grep -q '"workspaces":' package.json || [ -f "yarn.lock" ]; then
                             echo "Running 'yarn install' to regenerate lockfile."
@@ -244,6 +241,7 @@ jobs:
                       ;;
                   esac
                   
+                  # Use -c to reuse the original commit message from the PR
                   if git commit -c FETCH_HEAD; then
                     echo "✅ Successfully resolved conflict and applied PR #$number."
                     applied_pr_numbers+=($number)
