@@ -216,13 +216,13 @@ jobs:
                       if [ -s deps_to_install.txt ]; then
                         if [ -f "$project_dir/yarn.lock" ]; then
                           echo "Using yarn to add/update dependencies in $project_dir..."
-                          # By running `yarn add` for each package, we let yarn handle adding or updating the dependency.
-                          (cd "$project_dir" && xargs -n 1 yarn add < ../deps_to_install.txt)
+                          # Use $GITHUB_WORKSPACE for an absolute path to the deps file.
+                          (cd "$project_dir" && xargs -n 1 yarn add < "$GITHUB_WORKSPACE/deps_to_install.txt")
                           git add "$project_dir/yarn.lock"
                         else
                           echo "Using npm to install/update dependencies in $project_dir..."
-                          # By running `npm install` for each package, we let npm handle adding or updating the dependency.
-                          (cd "$project_dir" && xargs -n 1 npm install < ../deps_to_install.txt)
+                          # Use $GITHUB_WORKSPACE for an absolute path to the deps file.
+                          (cd "$project_dir" && xargs -n 1 npm install < "$GITHUB_WORKSPACE/deps_to_install.txt")
                           git add "$project_dir/package-lock.json"
                         fi
                         # Stage the manifest file that npm/yarn updated.
