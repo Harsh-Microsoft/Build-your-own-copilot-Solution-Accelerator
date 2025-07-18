@@ -177,7 +177,7 @@ jobs:
               git checkout -B "$branch_name" "origin/$TARGET_BRANCH"
             fi
 
-            applied_prs_count=0
+            applied_pr_numbers=()
             while read -r number ref group; do
               pr_title_grep=$(echo "${pr_metadata_map["$number"]}" | cut -d'|' -f1)
               # if git log --oneline --grep="$pr_title_grep"; then
@@ -190,44 +190,52 @@ jobs:
               
               if git cherry-pick FETCH_HEAD; then
                 echo "✅ Successfully applied PR #$number without conflicts."
-                applied_prs_count=$((applied_prs_count + 1))
+                applied_pr_numbers+=($number)
               else
                 echo "❌ Conflict found with PR #$number. Attempting 'merge and regenerate' strategy."
                 
-                # Check which manifest files are in a conflicted state
                 manifest_files_conflicted=$(git diff --name-only --diff-filter=U | grep -E "package.json|requirements.txt|pyproject.toml" || true)
 
                 if [ -n "$manifest_files_conflicted" ]; then
+                  resolution_failed=false
                   for manifest_file in $manifest_files_conflicted; do
                     echo "Attempting to resolve conflict in manifest file: $manifest_file"
                     
-                    # Resolve the conflict using git merge-file
-                    # --ours is the current branch, --theirs is the incoming commit
-                    git checkout --ours "$manifest_file"
-                    git checkout --theirs "$manifest_file"
-                    
-                    if git merge-file -p "$manifest_file.ours" "$manifest_file.base" "$manifest_file.theirs" > "$manifest_file"; then
+                    # Get the three versions of the file from the index
+                    git show :1:"$manifest_file" > base.txt
+                    git show :2:"$manifest_file" > ours.txt
+                    git show :3:"$manifest_file" > theirs.txt
+
+                    if git merge-file -p ours.txt base.txt theirs.txt > "$manifest_file"; then
                       echo "Successfully merged $manifest_file."
                       git add "$manifest_file"
                     else
-                      echo "❌ Could not automatically merge $manifest_file. Aborting cherry-pick."
-                      git cherry-pick --abort
-                      continue 2 # Skip to the next PR in the outer loop
+                      echo "❌ Could not automatically merge $manifest_file. Aborting."
+                      resolution_failed=true
+                      break
                     fi
                   done
+
+                  if [ "$resolution_failed" = true ]; then
+                    git cherry-pick --abort
+                    continue
+                  fi
 
                   # Now that the manifest is merged, regenerate the lockfile
                   case "$group_name" in
                     frontend)
-                      if [ -f "yarn.lock" ]; then
-                        echo "Running 'yarn install' to regenerate yarn.lock"
-                        yarn install --ignore-scripts
-                        git add yarn.lock
-                      elif [ -f "package-lock.json" ]; then
-                        echo "Running 'npm install' to regenerate package-lock.json"
-                        npm install --ignore-scripts
-                        git add package-lock.json
+                      # Resolve lockfile conflicts by simply removing them and regenerating
+                      git rm -f yarn.lock package-lock.json
+                      if [ -f "package.json" ]; then
+                        if grep -q '"workspaces":' package.json || [ -f "yarn.lock" ]; then
+                            echo "Running 'yarn install' to regenerate lockfile."
+                            yarn install --ignore-scripts
+                        else
+                            echo "Running 'npm install' to regenerate lockfile."
+                            npm install --ignore-scripts
+                        fi
                       fi
+                      git add yarn.lock package-lock.json package.json
                       ;;
                     backend)
                       echo "Running 'pip install' to update dependencies."
@@ -236,12 +244,11 @@ jobs:
                       ;;
                   esac
                   
-                  # Finalize the cherry-pick
-                  if git cherry-pick --continue; then
+                  if git commit -c FETCH_HEAD; then
                     echo "✅ Successfully resolved conflict and applied PR #$number."
-                    applied_prs_count=$((applied_prs_count + 1))
+                    applied_pr_numbers+=($number)
                   else
-                    echo "❌ Failed to continue cherry-pick after resolving conflicts. Aborting."
+                    echo "❌ Failed to commit after resolving conflicts. Aborting."
                     git cherry-pick --abort
                   fi
                 else
@@ -251,7 +258,7 @@ jobs:
               fi
             done < "$file"
 
-            if [ "$applied_prs_count" -eq 0 ]; then
+            if [ ${#applied_pr_numbers[@]} -eq 0 ]; then
               echo "No new PRs were applied for group '$group_name'. Nothing to do."
               continue
             fi
@@ -263,17 +270,18 @@ jobs:
             fi
 
             new_lines=""
-            # Get the list of applied PRs from the git log of the current branch
-            # that are also in our list of PRs to process for this group
-            applied_pr_numbers=()
+            all_pr_numbers_in_group=()
             while read -r number ref group; do
+              all_pr_numbers_in_group+=($number)
+            done < "$file"
+
+            for number in "${all_pr_numbers_in_group[@]}"; do
               pr_title_grep=$(echo "${pr_metadata_map["$number"]}" | cut -d'|' -f1)
               if git log "origin/$TARGET_BRANCH"..HEAD --oneline --grep="$pr_title_grep"; then
-                applied_pr_numbers+=($number)
                 IFS="|" read -r title url _ <<< "${pr_metadata_map["$number"]}"
                 new_lines+="- $title - [#$number]($url)\n"
               fi
-            done < "$file"
+            done
 
             pr_title="chore(deps): bump grouped $group_name dependencies"
             existing_url=$(gh pr list --head "$branch_name" --base "$TARGET_BRANCH" --state open --json url --jq '.[0].url // empty')
