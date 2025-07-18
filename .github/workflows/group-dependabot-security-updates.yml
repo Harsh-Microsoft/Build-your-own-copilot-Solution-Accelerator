@@ -223,28 +223,38 @@ jobs:
 
                   case "$group_name" in
                     frontend)
-                      if [ -f "package.json" ]; then
-                        # If a yarn.lock file exists, we treat it as a yarn project.
-                        if [ -f "yarn.lock" ]; then
-                            echo "Found yarn.lock, running 'yarn install' to regenerate lockfile."
-                            yarn install --ignore-scripts
-                            git add package.json yarn.lock
+                      # Find the package.json that was conflicted to determine the directory.
+                      # We assume only one package.json gets conflicted per cherry-pick for a single project.
+                      pkg_json_path=$(echo "$manifest_files_conflicted" | grep "package.json" | head -n1)
+                      if [ -n "$pkg_json_path" ]; then
+                        project_dir=$(dirname "$pkg_json_path")
+                        echo "Regenerating lockfile in directory: $project_dir"
+                        
+                        # If a yarn.lock file exists in that directory, we treat it as a yarn project.
+                        if [ -f "$project_dir/yarn.lock" ]; then
+                            echo "Found yarn.lock, running 'yarn install'."
+                            # Run yarn install from the project's directory
+                            (cd "$project_dir" && yarn install --ignore-scripts)
+                            # Add the regenerated lockfile to resolve its conflict
+                            git add "$project_dir/yarn.lock"
                         # Otherwise, we fall back to npm.
                         else
-                            echo "No yarn.lock found. Running 'npm install' to regenerate lockfile."
-                            npm install --ignore-scripts
-                            git add package.json
-                            # Add package-lock.json only if it exists.
-                            if [ -f "package-lock.json" ]; then
-                              git add package-lock.json
-                            fi
+                            echo "No yarn.lock found. Running 'npm install'."
+                            # Run npm install from the project's directory
+                            (cd "$project_dir" && npm install --ignore-scripts)
+                            # Add the regenerated lockfile to resolve its conflict
+                            git add "$project_dir/package-lock.json"
                         fi
                       fi
                       ;;
                     backend)
-                      echo "Running 'pip install' to update dependencies."
-                      pip install -r src/App/requirements.txt
-                      git add src/App/requirements.txt
+                      # For python, find the requirements file that was conflicted.
+                      req_file_path=$(echo "$manifest_files_conflicted" | grep "requirements.txt" | head -n1)
+                      if [ -n "$req_file_path" ]; then
+                        echo "Running 'pip install' for '$req_file_path' to ensure consistency."
+                        pip install -r "$req_file_path"
+                        # The requirements file itself was already staged in the merge loop.
+                      fi
                       ;;
                   esac
                   
