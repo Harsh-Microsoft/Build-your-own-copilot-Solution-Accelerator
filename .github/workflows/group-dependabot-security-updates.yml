@@ -259,7 +259,7 @@ jobs:
                   esac
                   
                   # Use -c to reuse the original commit message from the PR
-                  if git commit -c FETCH_HEAD; then
+                  if git commit -C FETCH_HEAD; then
                     echo "✅ Successfully resolved conflict and applied PR #$number."
                     applied_pr_numbers+=($number)
                   else
