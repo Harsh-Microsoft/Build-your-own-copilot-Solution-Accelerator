@@ -1,7 +1,7 @@
 # Workflow: Group Dependabot PRs
 # Description:
 # This GitHub Actions workflow automatically groups open Dependabot PRs by ecosystem.
-# It uses a sophisticated "merge and regenerate" strategy for conflict resolution,
+# It uses a sophisticated "Smart Apply" strategy for conflict resolution,
 # ensuring that dependency updates are combined correctly even when they conflict.
 #
 # Key Features:
@@ -192,16 +192,20 @@ jobs:
                 echo "✅ Successfully applied PR #$number without conflicts."
                 applied_pr_numbers+=($number)
               else
-                echo "❌ Conflict found with PR #$number. Attempting 'Smart Apply' strategy."
+                echo "❌ Conflict found with PR #$number. Attempting 'Clean and Update' strategy."
                 
                 manifest_files_conflicted=$(git diff --name-only --diff-filter=U | grep -E "package.json|requirements.txt|pyproject.toml" || true)
 
                 if [ -n "$manifest_files_conflicted" ]; then
                   echo "Conflict is in a known manifest. Proceeding with resolution."
                   
-                  # First, reset all conflicted manifest files to our current version.
-                  # This resolves the content conflict and gives us a clean slate to apply changes to.
-                  git checkout --ours $manifest_files_conflicted
+                  # Get a list of ALL conflicted files (manifests and lockfiles).
+                  all_conflicted_files=$(git diff --name-only --diff-filter=U)
+                  
+                  # First, resolve ALL conflicts by accepting our current version for all files.
+                  # This gives us a clean, non-conflicted working directory to apply the new changes to.
+                  echo "Resolving conflicts by accepting 'ours' for: $all_conflicted_files"
+                  git checkout --ours $all_conflicted_files
                   
                   # Now, intelligently apply the dependency changes from the incoming PR.
                   case "$group_name" in
@@ -210,22 +214,18 @@ jobs:
                       project_dir=$(dirname "$pkg_json_path")
                       
                       echo "Extracting dependencies from incoming PR for $pkg_json_path"
-                      # Extract dependencies from the incoming commit's package.json into a temporary file.
                       git show FETCH_HEAD:"$pkg_json_path" | jq -r '.dependencies + .devDependencies | to_entries[] | "\(.key)@\(.value)"' > deps_to_install.txt
                       
                       if [ -s deps_to_install.txt ]; then
                         if [ -f "$project_dir/yarn.lock" ]; then
                           echo "Using yarn to add/update dependencies in $project_dir..."
-                          # Remove -n 1 to run yarn add only once with all dependencies.
                           (cd "$project_dir" && xargs yarn add < "$GITHUB_WORKSPACE/deps_to_install.txt")
                           git add "$project_dir/yarn.lock"
                         else
                           echo "Using npm to install/update dependencies in $project_dir..."
-                          # Remove -n 1 to run npm install only once with all dependencies.
                           (cd "$project_dir" && xargs npm install < "$GITHUB_WORKSPACE/deps_to_install.txt")
                           git add "$project_dir/package-lock.json"
                         fi
-                        # Stage the manifest file that npm/yarn updated.
                         git add "$pkg_json_path"
                       else
                         echo "No dependencies found to install."
@@ -235,20 +235,10 @@ jobs:
                        req_file_path=$(echo "$manifest_files_conflicted" | grep "requirements.txt" | head -n1)
                        if [ -n "$req_file_path" ]; then
                          echo "Smart-merging Python requirements for '$req_file_path'"
-                         
-                         # Get the incoming version of the requirements file
                          git show FETCH_HEAD:"$req_file_path" > incoming_reqs.txt
-                         
-                         # Merge the two requirements files. The sort command with -u on the key (package name)
-                         # ensures that versions from the incoming file take precedence if a package is in both files.
-                         echo "Merging existing requirements with incoming ones..."
                          cat incoming_reqs.txt "$req_file_path" | sort -t'=' -k1,1 -u > merged_reqs.txt
                          mv merged_reqs.txt "$req_file_path"
-                         
-                         # Now install from the newly merged file to update the environment
                          pip install -r "$req_file_path"
-                         
-                         # Stage the merged requirements file
                          git add "$req_file_path"
                        fi
                       ;;
