@@ -224,15 +224,22 @@ jobs:
                   case "$group_name" in
                     frontend)
                       if [ -f "package.json" ]; then
-                        if grep -q '"workspaces":' package.json || [ -f "yarn.lock" ]; then
-                            echo "Running 'yarn install' to regenerate lockfile."
+                        # If a yarn.lock file exists, we treat it as a yarn project.
+                        if [ -f "yarn.lock" ]; then
+                            echo "Found yarn.lock, running 'yarn install' to regenerate lockfile."
                             yarn install --ignore-scripts
+                            git add package.json yarn.lock
+                        # Otherwise, we fall back to npm.
                         else
-                            echo "Running 'npm install' to regenerate lockfile."
+                            echo "No yarn.lock found. Running 'npm install' to regenerate lockfile."
                             npm install --ignore-scripts
+                            git add package.json
+                            # Add package-lock.json only if it exists.
+                            if [ -f "package-lock.json" ]; then
+                              git add package-lock.json
+                            fi
                         fi
                       fi
-                      git add yarn.lock package-lock.json package.json
                       ;;
                     backend)
                       echo "Running 'pip install' to update dependencies."
