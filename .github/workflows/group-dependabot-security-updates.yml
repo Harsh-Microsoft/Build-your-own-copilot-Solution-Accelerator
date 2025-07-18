@@ -192,73 +192,69 @@ jobs:
                 echo "✅ Successfully applied PR #$number without conflicts."
                 applied_pr_numbers+=($number)
               else
-                echo "❌ Conflict found with PR #$number. Attempting 'merge and regenerate' strategy."
+                echo "❌ Conflict found with PR #$number. Attempting 'Smart Apply' strategy."
                 
                 manifest_files_conflicted=$(git diff --name-only --diff-filter=U | grep -E "package.json|requirements.txt|pyproject.toml" || true)
 
                 if [ -n "$manifest_files_conflicted" ]; then
-                  resolution_failed=false
-                  for manifest_file in $manifest_files_conflicted; do
-                    echo "Attempting to resolve conflict in manifest file: $manifest_file"
-                    
-                    git show :1:"$manifest_file" > base.txt
-                    git show :2:"$manifest_file" > ours.txt
-                    git show :3:"$manifest_file" > theirs.txt
-
-                    # Use --theirs to automatically resolve line-level conflicts by taking the incoming change
-                    if git merge-file --theirs -p ours.txt base.txt theirs.txt > "$manifest_file"; then
-                      echo "Successfully merged $manifest_file using 'theirs' strategy."
-                      git add "$manifest_file"
-                    else
-                      echo "❌ Even with --theirs, could not merge $manifest_file. Aborting."
-                      resolution_failed=true
-                      break
-                    fi
-                  done
-
-                  if [ "$resolution_failed" = true ]; then
-                    git cherry-pick --abort
-                    continue
-                  fi
-
+                  echo "Conflict is in a known manifest. Proceeding with resolution."
+                  
+                  # First, reset all conflicted manifest files to our current version.
+                  # This resolves the content conflict and gives us a clean slate to apply changes to.
+                  git checkout --ours $manifest_files_conflicted
+                  
+                  # Now, intelligently apply the dependency changes from the incoming PR.
                   case "$group_name" in
                     frontend)
-                      # Find the package.json that was conflicted to determine the directory.
-                      # We assume only one package.json gets conflicted per cherry-pick for a single project.
                       pkg_json_path=$(echo "$manifest_files_conflicted" | grep "package.json" | head -n1)
-                      if [ -n "$pkg_json_path" ]; then
-                        project_dir=$(dirname "$pkg_json_path")
-                        echo "Regenerating lockfile in directory: $project_dir"
-                        
-                        # If a yarn.lock file exists in that directory, we treat it as a yarn project.
+                      project_dir=$(dirname "$pkg_json_path")
+                      
+                      echo "Extracting dependencies from incoming PR for $pkg_json_path"
+                      # Extract dependencies from the incoming commit's package.json into a temporary file.
+                      git show FETCH_HEAD:"$pkg_json_path" | jq -r '.dependencies + .devDependencies | to_entries[] | "\(.key)@\(.value)"' > deps_to_install.txt
+                      
+                      if [ -s deps_to_install.txt ]; then
                         if [ -f "$project_dir/yarn.lock" ]; then
-                            echo "Found yarn.lock, running 'yarn install'."
-                            # Run yarn install from the project's directory
-                            (cd "$project_dir" && yarn install --ignore-scripts)
-                            # Add the regenerated lockfile to resolve its conflict
-                            git add "$project_dir/yarn.lock"
-                        # Otherwise, we fall back to npm.
+                          echo "Using yarn to add/update dependencies in $project_dir..."
+                          # By running `yarn add` for each package, we let yarn handle adding or updating the dependency.
+                          (cd "$project_dir" && xargs -n 1 yarn add < ../deps_to_install.txt)
+                          git add "$project_dir/yarn.lock"
                         else
-                            echo "No yarn.lock found. Running 'npm install'."
-                            # Run npm install from the project's directory
-                            (cd "$project_dir" && npm install --ignore-scripts)
-                            # Add the regenerated lockfile to resolve its conflict
-                            git add "$project_dir/package-lock.json"
+                          echo "Using npm to install/update dependencies in $project_dir..."
+                          # By running `npm install` for each package, we let npm handle adding or updating the dependency.
+                          (cd "$project_dir" && xargs -n 1 npm install < ../deps_to_install.txt)
+                          git add "$project_dir/package-lock.json"
                         fi
+                        # Stage the manifest file that npm/yarn updated.
+                        git add "$pkg_json_path"
+                      else
+                        echo "No dependencies found to install."
                       fi
                       ;;
                     backend)
-                      # For python, find the requirements file that was conflicted.
-                      req_file_path=$(echo "$manifest_files_conflicted" | grep "requirements.txt" | head -n1)
-                      if [ -n "$req_file_path" ]; then
-                        echo "Running 'pip install' for '$req_file_path' to ensure consistency."
-                        pip install -r "$req_file_path"
-                        # The requirements file itself was already staged in the merge loop.
-                      fi
+                       req_file_path=$(echo "$manifest_files_conflicted" | grep "requirements.txt" | head -n1)
+                       if [ -n "$req_file_path" ]; then
+                         echo "Smart-merging Python requirements for '$req_file_path'"
+                         
+                         # Get the incoming version of the requirements file
+                         git show FETCH_HEAD:"$req_file_path" > incoming_reqs.txt
+                         
+                         # Merge the two requirements files. The sort command with -u on the key (package name)
+                         # ensures that versions from the incoming file take precedence if a package is in both files.
+                         echo "Merging existing requirements with incoming ones..."
+                         cat incoming_reqs.txt "$req_file_path" | sort -t'=' -k1,1 -u > merged_reqs.txt
+                         mv merged_reqs.txt "$req_file_path"
+                         
+                         # Now install from the newly merged file to update the environment
+                         pip install -r "$req_file_path"
+                         
+                         # Stage the merged requirements file
+                         git add "$req_file_path"
+                       fi
                       ;;
                   esac
-                  
-                  # Use -c to reuse the original commit message from the PR
+
+                  # All files should now be resolved and staged. We can commit.
                   if git commit -C FETCH_HEAD; then
                     echo "✅ Successfully resolved conflict and applied PR #$number."
                     applied_pr_numbers+=($number)
