@@ -1,4 +1,4 @@
-msal==1.35.0
+msal==1.35.1
 azure-identity
 pandas
 azure-storage-file-datalake
