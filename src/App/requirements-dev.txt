@@ -1,12 +1,12 @@
 -r requirements.txt
 azure-identity==1.25.3
-openai==2.30.0
-azure-search-documents==11.7.0b2
+openai==2.33.0
+azure-search-documents==12.0.0
 azure-storage-blob==12.28.0
 python-dotenv==1.2.2
 azure-cosmos==4.15.0
 quart==0.20.0
-uvicorn==0.42.0
+uvicorn==0.46.0
 aiohttp==3.13.5
 quart-session==3.0.0
 pymssql==2.3.13
